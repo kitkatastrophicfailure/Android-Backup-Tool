@@ -22,7 +22,7 @@ ASSUMED_MB_PER_SECOND = 15
 
 
 def format_bytes(size):
-    """Converts bytes to a readable format (KB, MB, GB)."""
+    """Converts bytes to a human-readable format (KB, MB, GB)."""
     if size is None:
         return "0 B"
     power = 1024
@@ -34,7 +34,7 @@ def format_bytes(size):
     return f"{size:.2f} {power_labels[n]}B"
 
 def format_seconds(seconds):
-    """Converts seconds into a readable string (minutes, seconds)."""
+    """Converts seconds into a human-readable string (minutes, seconds)."""
     if seconds < 60:
         return f"less than a minute"
     minutes = int(seconds / 60)
@@ -64,6 +64,8 @@ class App(customtkinter.CTk):
         self.log_queue = queue.Queue()
         self.scan_results_queue = queue.Queue()
         self.progress_queue = queue.Queue()
+        # --- FIX: Added a dedicated queue for UI state changes ---
+        self.ui_queue = queue.Queue()
 
         # --- UI Elements ---
         self.create_widgets()
@@ -78,6 +80,7 @@ class App(customtkinter.CTk):
         self.after(100, self.process_log_queue)
         self.after(100, self.process_scan_results_queue)
         self.after(100, self.process_progress_queue)
+        self.after(100, self.process_ui_queue)
 
     def create_widgets(self):
         """Creates and arranges all the UI elements in the window."""
@@ -115,7 +118,6 @@ class App(customtkinter.CTk):
         self.backup_apps_button = customtkinter.CTkButton(self.main_frame, text="Full App Backup (Advanced)", command=lambda: self.start_operation(self.backup_all_apps))
         self.backup_apps_button.grid(row=4, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
 
-        # --- FIX: Changed command to call a new handler function ---
         self.restore_apps_button = customtkinter.CTkButton(self.main_frame, text="Restore Full App Backup", fg_color="#28a745", hover_color="#218838", command=self.handle_restore_button_click)
         self.restore_apps_button.grid(row=5, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
 
@@ -284,6 +286,20 @@ class App(customtkinter.CTk):
             pass
         finally:
             self.after(100, self.process_progress_queue)
+            
+    # --- FIX: New queue processor for thread-safe UI updates ---
+    def process_ui_queue(self):
+        try:
+            while True:
+                message = self.ui_queue.get_nowait()
+                if message == 'enable':
+                    self.set_ui_state(True)
+                elif message == 'disable':
+                    self.set_ui_state(False)
+        except queue.Empty:
+            pass
+        finally:
+            self.after(100, self.process_ui_queue)
 
     def log_message(self, message):
         self.log_queue.put(message)
@@ -304,7 +320,8 @@ class App(customtkinter.CTk):
         if not self.device_id and target_function != self.check_device:
             self.log_message("Error: No device connected. Please refresh.")
             return
-        self.set_ui_state(False)
+        # --- FIX: Use the queue to disable UI from the main thread ---
+        self.ui_queue.put('disable')
         thread = threading.Thread(target=target_function, args=args)
         thread.daemon = True
         thread.start()
@@ -316,11 +333,11 @@ class App(customtkinter.CTk):
     def check_device(self):
         try:
             if not os.path.exists(ADB_PATH):
-                self.log_message(('status', "Status: ADB not found!", "red"))
+                self.log_queue.put(('status', "Status: ADB not found!", "red"))
                 self.log_message(f"CRITICAL ERROR: ADB not found at: {ADB_PATH}")
                 self.device_id = None
                 return
-            result = subprocess.run([ADB_PATH, "devices"], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            result = subprocess.run([ADB_PATH, "devices"], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=15)
             lines = result.stdout.strip().split('\n')
             if len(lines) > 1 and "device" in lines[1]:
                 self.device_id = lines[1].split()[0]
@@ -329,12 +346,17 @@ class App(customtkinter.CTk):
             else:
                 self.device_id = None
                 self.log_queue.put(('status', "Status: No Authorized Device Found", "orange"))
+        except subprocess.TimeoutExpired:
+            self.device_id = None
+            self.log_queue.put(('status', "Status: ADB command timed out", "red"))
+            self.log_message("Error: 'adb devices' command took too long to respond. Is the phone connected properly?")
         except Exception as e:
             self.device_id = None
             self.log_queue.put(('status', "Status: Error", "red"))
-            self.log_message(f"An error occurred: {e}")
+            self.log_message(f"An error occurred during device check: {e}")
         finally:
-            self.set_ui_state(True)
+            # --- FIX: Use the queue to re-enable the UI ---
+            self.ui_queue.put('enable')
 
     def run_adb_command(self, command_list, return_output=False):
         try:
@@ -349,26 +371,30 @@ class App(customtkinter.CTk):
             if process.returncode == 0: return "".join(stdout_output) if return_output else True
             return None if return_output else False
         except Exception as e:
-            self.log_message(f"An unexpected error occurred: {e}")
+            self.log_message(f"An unexpected error occurred while running ADB: {e}")
             return None if return_output else False
 
     def scan_device_for_files(self):
-        self.log_message("--- Starting Device Scan ---")
-        self.progress_queue.put("start_indeterminate")
-        self.progress_queue.put("Scanning device... this may take a while.")
-        self.scan_results_queue.put({}) 
-        command = [ADB_PATH, "shell", "ls", "-lR", "/sdcard/"]
-        output = self.run_adb_command(command, return_output=True)
-        if output:
-            self.log_message("Scan complete. Parsing results...")
-            self.progress_queue.put("Parsing results...")
-            parsed_stats = self.parse_ls_output(output)
-            self.scan_results_queue.put(parsed_stats)
-            self.log_message("--- Scan Analysis Finished ---")
-        else:
-            self.log_message("--- Scan Failed: No data received. ---")
-        self.progress_queue.put("stop")
-        self.set_ui_state(True)
+        try:
+            self.log_message("--- Starting Device Scan ---")
+            self.progress_queue.put("start_indeterminate")
+            self.progress_queue.put("Scanning device... this may take a while.")
+            self.scan_results_queue.put({}) 
+            command = [ADB_PATH, "shell", "ls", "-lR", "/sdcard/"]
+            output = self.run_adb_command(command, return_output=True)
+            if output:
+                self.log_message("Scan complete. Parsing results...")
+                self.progress_queue.put("Parsing results...")
+                parsed_stats = self.parse_ls_output(output)
+                self.scan_results_queue.put(parsed_stats)
+                self.log_message("--- Scan Analysis Finished ---")
+            else:
+                self.log_message("--- Scan Failed: No data received. ---")
+        except Exception as e:
+            self.log_message(f"An error occurred during scan: {e}")
+        finally:
+            self.progress_queue.put("stop")
+            self.ui_queue.put('enable')
 
     def parse_ls_output(self, output):
         stats = {}
@@ -395,70 +421,76 @@ class App(customtkinter.CTk):
         return stats
 
     def backup_selected_folders(self):
-        self.log_message("--- Starting Selected Folder Backup ---")
-        
-        selected_folders = [folder for folder, checkbox in self.folder_checkboxes.items() if checkbox.get() == 1]
-
-        if not selected_folders:
-            self.log_message("No folders selected. Nothing to back up.")
-            self.set_ui_state(True)
-            return
-
-        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        current_backup_path = os.path.join(BACKUP_DIR, timestamp)
-        self.log_message(f"Creating new backup in: {current_backup_path}")
-
-        self.progress_queue.put("start_determinate")
-        os.makedirs(current_backup_path, exist_ok=True)
-        
-        total_size = sum(self.folder_stats.get(f, {}).get('size', 0) for f in selected_folders)
-        backed_up_size = 0
-        
-        if total_size > 0:
-            estimated_seconds = total_size / (ASSUMED_MB_PER_SECOND * 1024 * 1024)
-            self.progress_queue.put(f"Time: ~{format_seconds(estimated_seconds)} remaining")
-
-        for folder in selected_folders:
-            self.progress_queue.put(f"Backing up {folder}...")
-            dest_path = os.path.join(current_backup_path, folder)
-            os.makedirs(dest_path, exist_ok=True)
+        try:
+            self.log_message("--- Starting Selected Folder Backup ---")
             
-            source_path = f"/sdcard/{folder}" if folder != "Internal Storage (Root)" else "/sdcard/"
-            self.run_adb_command([ADB_PATH, "pull", source_path, dest_path])
+            selected_folders = [folder for folder, checkbox in self.folder_checkboxes.items() if checkbox.get() == 1]
+
+            if not selected_folders:
+                self.log_message("No folders selected. Nothing to back up.")
+                self.ui_queue.put('enable')
+                return
+
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            current_backup_path = os.path.join(BACKUP_DIR, timestamp)
+            self.log_message(f"Creating new backup in: {current_backup_path}")
+
+            self.progress_queue.put("start_determinate")
+            os.makedirs(current_backup_path, exist_ok=True)
+            
+            total_size = sum(self.folder_stats.get(f, {}).get('size', 0) for f in selected_folders)
+            backed_up_size = 0
             
             if total_size > 0:
-                backed_up_size += self.folder_stats.get(folder, {}).get('size', 0)
-                progress = backed_up_size / total_size
-                self.progress_queue.put(progress)
-                
-                remaining_size = total_size - backed_up_size
-                estimated_seconds_left = remaining_size / (ASSUMED_MB_PER_SECOND * 1024 * 1024)
-                self.progress_queue.put(f"Time: ~{format_seconds(estimated_seconds_left)} remaining")
+                estimated_seconds = total_size / (ASSUMED_MB_PER_SECOND * 1024 * 1024)
+                self.progress_queue.put(f"Time: ~{format_seconds(estimated_seconds)} remaining")
 
-        self.progress_queue.put("stop")
-        self.log_message(f"--- Selected Folder Backup Finished. ---")
-        self.set_ui_state(True)
+            for folder in selected_folders:
+                self.progress_queue.put(f"Backing up {folder}...")
+                dest_path = os.path.join(current_backup_path, folder)
+                os.makedirs(dest_path, exist_ok=True)
+                
+                source_path = f"/sdcard/{folder}" if folder != "Internal Storage (Root)" else "/sdcard/"
+                self.run_adb_command([ADB_PATH, "pull", source_path, dest_path])
+                
+                if total_size > 0:
+                    backed_up_size += self.folder_stats.get(folder, {}).get('size', 0)
+                    progress = backed_up_size / total_size
+                    self.progress_queue.put(progress)
+                    
+                    remaining_size = total_size - backed_up_size
+                    estimated_seconds_left = remaining_size / (ASSUMED_MB_PER_SECOND * 1024 * 1024)
+                    self.progress_queue.put(f"Time: ~{format_seconds(estimated_seconds_left)} remaining")
+
+            self.log_message(f"--- Selected Folder Backup Finished. ---")
+        except Exception as e:
+            self.log_message(f"An error occurred during folder backup: {e}")
+        finally:
+            self.progress_queue.put("stop")
+            self.ui_queue.put('enable')
 
     def backup_all_apps(self):
-        self.log_message("--- Starting Full App Backup ---")
-        
-        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        current_backup_path = os.path.join(BACKUP_DIR, timestamp)
-        self.log_message(f"Creating new app backup in: {current_backup_path}")
+        try:
+            self.log_message("--- Starting Full App Backup ---")
+            
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            current_backup_path = os.path.join(BACKUP_DIR, timestamp)
+            self.log_message(f"Creating new app backup in: {current_backup_path}")
 
-        self.progress_queue.put("start_indeterminate")
-        self.progress_queue.put("Performing full app backup... Please check your phone to confirm.")
-        os.makedirs(current_backup_path, exist_ok=True)
-        backup_file = os.path.join(current_backup_path, "full_backup.ab")
+            self.progress_queue.put("start_indeterminate")
+            self.progress_queue.put("Performing full app backup... Please check your phone to confirm.")
+            os.makedirs(current_backup_path, exist_ok=True)
+            backup_file = os.path.join(current_backup_path, "full_backup.ab")
 
-        self.run_adb_command([ADB_PATH, "backup", "-apk", "-shared", "-all", "-f", backup_file])
-        self.progress_queue.put("stop")
-        self.log_message(f"--- Full backup process complete. File at '{backup_file}' ---")
-        self.set_ui_state(True)
+            self.run_adb_command([ADB_PATH, "backup", "-apk", "-shared", "-all", "-f", backup_file])
+            self.log_message(f"--- Full backup process complete. File at '{backup_file}' ---")
+        except Exception as e:
+            self.log_message(f"An error occurred during app backup: {e}")
+        finally:
+            self.progress_queue.put("stop")
+            self.ui_queue.put('enable')
 
-    # --- FIX: New handler for the restore button ---
     def handle_restore_button_click(self):
-        """Opens file dialog in main thread before starting restore thread."""
         if self.is_operation_running:
             self.log_message("Error: An operation is already in progress.")
             return
@@ -471,17 +503,22 @@ class App(customtkinter.CTk):
 
         if backup_file:
             self.start_operation(self.restore_all_apps, args=(backup_file,))
+        else:
+            self.log_message("Restore canceled by user.")
 
     def restore_all_apps(self, backup_file):
-        """Restores a backup from a given file path."""
-        self.log_message("--- Starting Full App Restore ---")
-        self.log_message(f"Selected backup file for restore: {backup_file}")
-        self.progress_queue.put("start_indeterminate")
-        self.progress_queue.put("Restoring... Please check your phone to confirm.")
-        self.run_adb_command([ADB_PATH, "restore", backup_file])
-        self.progress_queue.put("stop")
-        self.log_message("--- Full Restore Command Sent. ---")
-        self.set_ui_state(True)
+        try:
+            self.log_message("--- Starting Full App Restore ---")
+            self.log_message(f"Selected backup file for restore: {backup_file}")
+            self.progress_queue.put("start_indeterminate")
+            self.progress_queue.put("Restoring... Please check your phone to confirm.")
+            self.run_adb_command([ADB_PATH, "restore", backup_file])
+            self.log_message("--- Full Restore Command Sent. ---")
+        except Exception as e:
+            self.log_message(f"An error occurred during restore: {e}")
+        finally:
+            self.progress_queue.put("stop")
+            self.ui_queue.put('enable')
 
 
 if __name__ == "__main__":
