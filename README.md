@@ -60,7 +60,7 @@ If you want to run or modify the source code, follow these instructions.
 * **Android SDK Platform-Tools**: This contains `adb.exe`. Download the tools from the official Android developer website and place `adb.exe` (and its DLLs, if any) in the project folder.
 
 #### Prepare and Run the Application
-1.  Save the application's Python script (`backup_tool.py`) inside your project folder.
+1.  Save the application's Python script (`backup_tool.pyw`) inside your project folder.
 2.  Ensure `adb.exe` is in the same folder.
 3.  Open a Command Prompt or PowerShell and install the required Python libraries:
     ```bash
@@ -68,7 +68,7 @@ If you want to run or modify the source code, follow these instructions.
     ```
 4.  Run the application from the command line:
     ```bash
-    python backup_tool.py
+    python backup_tool.pyw
     ```
 ---
 ## How to Package into an EXE
@@ -83,6 +83,6 @@ You can package this application into a single `.exe` file using **PyInstaller**
     Open a Command Prompt or PowerShell, navigate to your project folder, and run the command below. To force the app to request admin privileges, you will first need to create the `admin.manifest` file mentioned in previous instructions.
 
     ```bash
-    pyinstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="your_icon.ico" backup_tool.py
+    pyinstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="your_icon.ico" backup_tool.pyw
     ```
 3.  **Find Your EXE**: The final `backup_tool.exe` will be located in the `dist` folder.
