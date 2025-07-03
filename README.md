@@ -27,7 +27,7 @@ A simple yet powerful desktop application for Windows that allows users to back 
     Go to the Releases page of this project's repository and download the latest `Android_Backup_Tool.zip` file.
 
 2.  **Prepare the Application**
-    Unzip the downloaded file. This will give you a folder containing `backup_tool.exe` and any necessary ADB files.
+    Unzip the downloaded file. This will give you a folder containing `android_backup_app.exe` and any necessary ADB files.
     **Important:** Keep all files in the same folder.
 
 3.  **Enable USB Debugging on Your Phone**
@@ -39,7 +39,7 @@ A simple yet powerful desktop application for Windows that allows users to back 
     * Inside Developer options, find and turn **ON** the switch for **"USB debugging"**.
 
 4.  **Run the Backup Tool**
-    * Double-click `backup_tool.exe` to run the application. On first launch, you must agree to the disclaimer.
+    * Double-click `android_backup_app.exe` to run the application. On first launch, you must agree to the disclaimer.
     * Connect your phone to your computer with a USB cable.
     * A pop-up will appear on your phone asking to "Allow USB debugging?". Check the box that says **"Always allow from this computer"** and tap **"Allow"**.
     * In the app's **"Device & Backup"** tab, click the **"Refresh Connection"** button. The status should turn green and show your device model.
@@ -60,7 +60,7 @@ If you want to run or modify the source code, follow these instructions.
 * **Android SDK Platform-Tools**: This contains `adb.exe`. Download the tools from the official Android developer website and place `adb.exe` (and its DLLs, if any) in the project folder.
 
 #### Prepare and Run the Application
-1.  Save the application's Python script (`backup_tool.pyw`) inside your project folder.
+1.  Save the application's Python script (`android_backup_app.pyw`) inside your project folder.
 2.  Ensure `adb.exe` is in the same folder.
 3.  Open a Command Prompt or PowerShell and install the required Python libraries:
     ```bash
@@ -68,7 +68,7 @@ If you want to run or modify the source code, follow these instructions.
     ```
 4.  Run the application from the command line:
     ```bash
-    python backup_tool.pyw
+    python android_backup_app.pyw
     ```
 ---
 ## How to Package into an EXE
@@ -83,6 +83,6 @@ You can package this application into a single `.exe` file using **PyInstaller**
     Open a Command Prompt or PowerShell, navigate to your project folder, and run the command below. To force the app to request admin privileges, you will first need to create the `admin.manifest` file mentioned in previous instructions.
 
     ```bash
-    pyinstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="your_icon.ico" backup_tool.pyw
+    pyinstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="your_icon.ico" android_backup_app.pyw
     ```
-3.  **Find Your EXE**: The final `backup_tool.exe` will be located in the `dist` folder.
+3.  **Find Your EXE**: The final `android_backup_app.exe` will be located in the `dist` folder.
