@@ -454,7 +454,7 @@ class App(customtkinter.CTk):
 
     def run_adb_command(self, command_list, return_output=False):
         try:
-            process = subprocess.Popen(command_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            process = subprocess.Popen(command_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8', errors='replace')
             stdout_output, stderr_output = process.communicate()
             
             if "no devices/emulators found" in stderr_output:
