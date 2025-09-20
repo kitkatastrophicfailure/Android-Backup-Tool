@@ -83,6 +83,6 @@ You can package this application into a single `.exe` file using **PyInstaller**
     Open a Command Prompt or PowerShell, navigate to your project folder, and run the command below. To force the app to request admin privileges, you will first need to create the `admin.manifest` file mentioned in previous instructions.
 
     ```bash
-    pyinstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="your_icon.ico" android_backup_app.pyw
+    python -m PyInstaller --onefile --windowed --add-data "adb.exe;." --manifest "admin.manifest" --icon="android.png" android_backup_app.pyw
     ```
 3.  **Find Your EXE**: The final `android_backup_app.exe` will be located in the `dist` folder.
